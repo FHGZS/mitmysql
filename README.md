@@ -4,10 +4,10 @@ Man in the Middle Attack for MySQL.
 # Example
 
 ## Situation
-MySQL Server is at `192.168.0.1`.
-MITMySQL Server (this script) will listen 0.0.0.0:3306 (*you can change this with `--lport` option*) at `192.168.0.2`.
-
-A victim (client) connects to MITMySQL Server (this script) = `192.168.0.2` and he has the credential for valid MySQL server `192.168.0.1`.
+- MySQL Server is running at `192.168.0.1`.
+- MITMySQL Server (this script) will listen 0.0.0.0:3306 (*you can change this with `--lport` option*) at `192.168.0.2`.
+- A victim (client) will connect to MITMySQL Server (this script) = `192.168.0.2`.
+  - he has the credential for valid MySQL server `192.168.0.1`.
 
 ## How it works.
 The attacker run this script at `192.168.0.2`.

